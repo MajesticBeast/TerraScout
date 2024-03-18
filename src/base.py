@@ -2,7 +2,7 @@ import sys
 import requests
 from urllib.parse import urlparse, urlunparse, urlencode
 import time
-from . import filters
+from TerraScout.src import filters
 from typing import List
 
 RATELIMIT = 30
@@ -15,13 +15,6 @@ class Client:
         self.org_name = org_name
         self.token = token
         self.headers = {'Authorization': f'Bearer {self.token}'}
-        self.endpoint = {
-            'modules': [],
-            'workspaces': [],
-            'tf_versions': [],
-            'providers': [],
-            'registry_modules': []
-        }
 
     def modules(self, module_filters: List[filters.ModuleFilter]) -> list:
         """
@@ -29,16 +22,16 @@ class Client:
         :param module_filters: The filters to apply to the query.
         :return: The modules for the organization.
         """
-        url = build_explorer_url(self.org_name)
+        url = _build_explorer_url(self.org_name)
         params = {'type': 'modules', 'page[size]': 100}
 
         for i, module_filter in enumerate(module_filters):
-            key = f"filter[{i}][{module_filter.type.__str__()}][{module_filter.operator.__str__()}][0]"
+            key = f"filter[{i}][{module_filter.type.value}][{module_filter.operator.value}][0]"
             params[key] = module_filter.value
 
         url = f'{url}?{urlencode(params)}'
 
-        modules = self.get_data(url, 'modules')
+        modules = self._get_data(url)
 
         return modules
 
@@ -48,16 +41,16 @@ class Client:
         :param workspace_filters: The filters to apply to the query.
         :return: The workspaces for the organization.
         """
-        url = build_explorer_url(self.org_name)
+        url = _build_explorer_url(self.org_name)
         params = {'type': 'workspaces', 'page[size]': 100}
 
         for i, workspace_filter in enumerate(workspace_filters):
-            key = f"filter[{i}][{workspace_filter.type.__str__()}][{workspace_filter.operator.__str__()}][0]"
+            key = f"filter[{i}][{workspace_filter.type.value}][{workspace_filter.operator.value}][0]"
             params[key] = workspace_filter.value
 
         url = f'{url}?{urlencode(params)}'
 
-        workspaces = self.get_data(url, 'workspaces')
+        workspaces = self._get_data(url)
 
         return workspaces
 
@@ -67,16 +60,16 @@ class Client:
         :param provider_filters: The filters to apply to the query.
         :return: The providers for the organization.
         """
-        url = build_explorer_url(self.org_name)
+        url = _build_explorer_url(self.org_name)
         params = {'type': 'providers', 'page[size]': 100}
 
         for i, provider_filter in enumerate(provider_filters):
-            key = f"filter[{i}][{provider_filter.type.__str__()}][{provider_filter.operator.__str__()}][0]"
+            key = f"filter[{i}][{provider_filter.type.value}][{provider_filter.operator.value}][0]"
             params[key] = provider_filter.value
 
         url = f'{url}?{urlencode(params)}'
 
-        providers = self.get_data(url, 'providers')
+        providers = self._get_data(url)
 
         return providers
 
@@ -86,16 +79,16 @@ class Client:
         :param tf_version_filters: The filters to apply to the query.
         :return: The Terraform versions for the organization.
         """
-        url = build_explorer_url(self.org_name)
+        url = _build_explorer_url(self.org_name)
         params = {'type': 'tf_versions', 'page[size]': 100}
 
         for i, tf_version_filter in enumerate(tf_version_filters):
-            key = f"filter[{i}][{tf_version_filter.type.__str__()}][{tf_version_filter.operator.__str__()}][0]"
+            key = f"filter[{i}][{tf_version_filter.type.value}][{tf_version_filter.operator.value}][0]"
             params[key] = tf_version_filter.value
 
         url = f'{url}?{urlencode(params)}'
 
-        tf_versions = self.get_data(url, 'tf_versions')
+        tf_versions = self._get_data(url)
 
         return tf_versions
 
@@ -105,22 +98,22 @@ class Client:
         to 0, which as of now is the latest version. No comparison is done to ensure this is the latest version.
         :return: The latest version of all modules for the organization.
         """
-        url = build_registry_url(self.org_name)
+        url = _build_registry_url(self.org_name)
         params = {'page[size]': 100}
 
         url = f'{url}?{urlencode(params)}'
 
-        registry_modules = self.get_data(url, 'registry_modules')
+        registry_modules = self._get_data(url)
 
         return registry_modules
 
-    def get_data(self, url, endpoint_type: str) -> list:
+    def _get_data(self, url: str) -> list:
         """
         Try to make a request and handle any exceptions that occur.
         :param url: The URL to request.
-        :param endpoint_type: The type of endpoint being requested. (workspace, module, etc.)
         :return: The data from the request in list format.
         """
+        results = []
         while url:
             try:
                 response = self.session.get(url, headers=self.headers)
@@ -131,16 +124,16 @@ class Client:
                 print(f'Error fetching modules: {e}', file=sys.stderr)
                 sys.exit(1)
 
-            check_status_code(response)
+            _check_status_code(response)
             data = response.json()
-            self.endpoint[endpoint_type].extend(data['data'])
+            results.extend(data['data'])
 
             url = data['links']['next'] \
                 if data['meta']['pagination']['next-page'] is not None else None
 
-            prevent_rate_limiting(data['meta']['pagination']['total-pages'])
+            _prevent_rate_limiting(data['meta']['pagination']['total-pages'])
 
-        return self.endpoint[endpoint_type]
+        return results
 
 
 class RateLimitExceededException(Exception):
@@ -148,27 +141,17 @@ class RateLimitExceededException(Exception):
     pass
 
 
-def build_explorer_url(org_name: str) -> str:
-    """
-    Build the URL for the explorer endpoint.
-    :param org_name: The name of the organization.
-    :return: The URL for the explorer endpoint.
-    """
+def _build_explorer_url(org_name: str) -> str:
     base_url = urlparse(f'https://app.terraform.io/api/v2/organizations/{org_name}/explorer')
     return str(urlunparse(base_url))
 
 
-def build_registry_url(org_name: str) -> str:
-    """
-    Build the URL for the registry modules endpoint.
-    :param org_name: The name of the organization.
-    :return: The URL for the registry modules endpoint.
-    """
+def _build_registry_url(org_name: str) -> str:
     base_url = urlparse(f'https://app.terraform.io/api/v2/organizations/{org_name}/registry-modules')
     return str(urlunparse(base_url))
 
 
-def check_status_code(response: requests.Response) -> None:
+def _check_status_code(response: requests.Response) -> None:
     """
     Check the status code of the response and raise an exception if the rate limit is exceeded.
     :param response: The response object from the request.
@@ -181,7 +164,7 @@ def check_status_code(response: requests.Response) -> None:
         raise requests.exceptions.RequestException(f'Unexpected status code: {response.status_code}')
 
 
-def prevent_rate_limiting(page_count: int) -> None:
+def _prevent_rate_limiting(page_count: int) -> None:
     """
     Prevent rate limiting by sleeping for a short period of time if the page count exceeds the rate limit.
     :param page_count: The total number of pages returned by the API.
@@ -189,5 +172,5 @@ def prevent_rate_limiting(page_count: int) -> None:
     if page_count < RATELIMIT:
         return
 
-    delay = 1000.0 / RATELIMIT + RATEBUFFER
+    delay = ((1000.0 / RATELIMIT) + RATEBUFFER) * 0.001
     time.sleep(delay)
